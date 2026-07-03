@@ -9,7 +9,7 @@ from docx import Document
 from docx.shared import Pt
 import google.generativeai as genai
 from groq import Groq
-from mistralai import Mistral
+from mistralai.client import MistralClient as Mistral
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 from google.oauth2 import service_account
@@ -308,7 +308,7 @@ def groq_ia(prompt):
 def mistral_ia(prompt):
     try:
         c = Mistral(api_key=st.secrets["MISTRAL_API_KEY"])
-        r = c.chat.complete(model="mistral-large-latest", messages=[{"role":"user","content":prompt}])
+        r = c.chat.chat(model="mistral-large-latest", messages=[{"role":"user","content":prompt}])
         return r.choices[0].message.content
     except Exception as e:
         return f"[MISTRAL ERROR: {e}]"
