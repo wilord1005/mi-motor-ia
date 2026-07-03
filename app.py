@@ -204,4 +204,3 @@ st.markdown("---")
 st.header("📋 Sección 2: Base de Datos Maestra F0 - F4.6")
 for ev in bd_todos_eventos_python:
     with st.expander(f"📊 MATRIZ: {ev['titulo']}"):
-        st.write(f"• F0 Cuotas: {ev['f0_cuotas']} | • F1 Ticks: {ev['f1_ticks']} | • F3 Probabilidad: {ev['f3_probabilidad']}% | • F4 Pick: {ev['f4_pick']}")
