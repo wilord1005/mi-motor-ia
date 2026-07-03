@@ -130,6 +130,7 @@ def conectar_drive():
             st.session_state["drive_folder_id"] = files[0]["id"]
         return svc
     except Exception as e:
+        st.session_state["drive_error"] = str(e)
         return None
 
 def leer_docx(service, nombre):
@@ -673,7 +674,7 @@ with c5:
                     })
                     st.rerun()
                 else:
-                    st.error("Error. Verifica secrets.")
+                    st.error(f"Error: {st.session_state.get('drive_error', 'desconocido')}")
     else:
         if st.button("🔄 Recargar docs", use_container_width=True):
             st.session_state["fases_cache"] = {}
