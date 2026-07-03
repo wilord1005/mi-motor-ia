@@ -279,7 +279,7 @@ def python_scraping(query):
 def gemini(prompt):
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        return genai.GenerativeModel("gemini-1.5-flash").generate_content(prompt).text
+        return genai.GenerativeModel("gemini-flash-latest").generate_content(prompt).text
     except Exception as e:
         return f"[GEMINI ERROR: {e}]"
 
