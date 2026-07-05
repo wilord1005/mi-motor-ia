@@ -246,7 +246,13 @@ def api_sportsdb(endpoint):
         url = f"https://www.thesportsdb.com/api/v1/json/3/{endpoint}"
         r = requests.get(url, timeout=8)
         data = r.json()
-        return json.dumps(list(data.values())[0][:3] if data else {}, ensure_ascii=False, indent=2)[:1000]
+        if not data:
+            return "[SPORTSDB: sin respuesta]"
+        valores = list(data.values())
+        primer_valor = valores[0] if valores else None
+        if not primer_valor:
+            return "[SPORTSDB: sin datos para esa búsqueda]"
+        return json.dumps(primer_valor[:3], ensure_ascii=False, indent=2)[:1000]
     except Exception as e:
         return f"[SPORTSDB ERROR: {e}]"
 
@@ -268,52 +274,61 @@ def python_scraping(query):
                         celdas = fila.find_all(["td","th"])
                         if celdas:
                             texto += " | ".join(c.get_text(strip=True) for c in celdas) + "\n"
-            except:
+            except Exception:
                 pass
-    except:
-        pass
+    except Exception as e:
+        return f"[Python ERROR: {type(e).__name__}: {e}]"
     return texto[:1500] if texto else "[Python: sin resultados]"
 
 # ============================================================
-# IAs
+# IAs — modelos 100% gratuitos (sin herramientas de pago)
 # ============================================================
 def gemini(prompt):
+    """Gemini analiza el prompt. Modelo gratuito (librería google-generativeai)."""
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        return genai.GenerativeModel("gemini-flash-latest").generate_content(prompt).text
+        resp = genai.GenerativeModel("gemini-flash-latest").generate_content(prompt)
+        return resp.text or "[GEMINI: respuesta vacía]"
     except Exception as e:
-        return f"[GEMINI ERROR: {e}]"
+        return f"[GEMINI ERROR: {type(e).__name__}: {e}]"
 
 def groq_ia(prompt):
+    """Groq analiza el prompt. Modelo gratuito (llama-3.3-70b), sin compound de pago."""
     try:
         c = Groq(api_key=st.secrets["GROQ_API_KEY"])
         r = c.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{"role":"user","content":prompt}],
+            messages=[{"role": "user", "content": prompt}],
             max_tokens=3000, temperature=0.1
         )
-        return r.choices[0].message.content
+        return r.choices[0].message.content or "[GROQ: respuesta vacía]"
     except Exception as e:
-        return f"[GROQ ERROR: {e}]"
+        return f"[GROQ ERROR: {type(e).__name__}: {e}]"
 
 def mistral_ia(prompt):
+    """Mistral analiza el prompt. Modelo gratuito, sin Agents API/web_search de pago."""
     try:
         c = Mistral(api_key=st.secrets["MISTRAL_API_KEY"])
         r = c.chat.complete(
             model="mistral-small-latest",
             messages=[{"role": "user", "content": prompt}]
         )
-        return r.choices[0].message.content
+        return r.choices[0].message.content or "[MISTRAL: respuesta vacía]"
     except Exception as e:
-        return f"[MISTRAL ERROR: {e}]"
+        return f"[MISTRAL ERROR: {type(e).__name__}: {e}]"
 
-def ia_busca(query, fn_ia):
+def ia_busca(query):
+    """Búsqueda gratuita vía DuckDuckGo. Python la ejecuta con una consulta
+    DISTINTA para cada IA, así cada una razona sobre su propio ángulo
+    de información en vez de recibir exactamente lo mismo."""
     try:
         with DDGS() as ddgs:
             raw = list(ddgs.text(query, max_results=5))
+        if not raw:
+            return "[BÚSQUEDA: sin resultados]"
         return "\n".join(f"• {r.get('title','')}: {r.get('body','')}" for r in raw)
-    except:
-        return "[sin resultados]"
+    except Exception as e:
+        return f"[BÚSQUEDA ERROR: {type(e).__name__}: {e}]"
 
 # ============================================================
 # MOTOR CUADRANGULAR CON APIs
@@ -329,6 +344,9 @@ def motor_completo(comando, fase, doc_motor, datos_evento=""):
         "aprendizajes": [], "alertas": []
     }
 
+    # ---- PASO 1: Python busca por SU CUENTA (scraping + APIs deportivas) ----
+    # Nota: esto es Python actuando como UN participante más del equipo,
+    # NO como buscador para las IAs. Cada IA busca la suya en el Paso 2.
     def buscar_python():
         return python_scraping(evento_q)
 
@@ -348,31 +366,16 @@ def motor_completo(comando, fase, doc_motor, datos_evento=""):
         equipo = evento_q.split("vs")[0].strip() if "vs" in evento_q.lower() else evento_q[:20]
         return api_sportsdb(f"searchteams.php?t={equipo.replace(' ', '_')}")
 
-    def buscar_gemini():
-        return ia_busca(f"{evento_q} estadísticas forma reciente resultados", gemini)
-
-    def buscar_groq():
-        return ia_busca(f"{evento_q} head to head historial enfrentamientos", groq_ia)
-
-    def buscar_mistral():
-        return ia_busca(f"{evento_q} tabla posiciones liga temporada", mistral_ia)
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=7) as ex:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
         fp = ex.submit(buscar_python)
         fo = ex.submit(buscar_odds)
         ff = ex.submit(buscar_football)
         fs = ex.submit(buscar_sportsdb)
-        fg = ex.submit(buscar_gemini)
-        fgr = ex.submit(buscar_groq)
-        fm = ex.submit(buscar_mistral)
 
         resultado["python"] = fp.result()
         resultado["odds"] = fo.result()
         resultado["football"] = ff.result()
         resultado["sportsdb"] = fs.result()
-        resultado["gemini_web"] = fg.result()
-        resultado["groq_web"] = fgr.result()
-        resultado["mistral_web"] = fm.result()
 
     st.session_state["datos_compartidos"][fase] = {
         "evento": evento_q,
@@ -388,12 +391,31 @@ def motor_completo(comando, fase, doc_motor, datos_evento=""):
         if f_prev != fase:
             datos_previos += f"\n=== DATOS DE {f_prev} (fase anterior) ===\n{json.dumps(d, ensure_ascii=False)[:400]}\n"
 
+    # ---- PASO 2: CADA IA BUSCA POR SU CUENTA (gratis, vía DuckDuckGo,
+    # con una pregunta DISTINTA cada una) Y LUEGO ANALIZA ----
+    def buscar_gemini():
+        return ia_busca(f"{evento_q} estadísticas forma reciente resultados")
+
+    def buscar_groq():
+        return ia_busca(f"{evento_q} head to head historial enfrentamientos")
+
+    def buscar_mistral():
+        return ia_busca(f"{evento_q} tabla posiciones liga temporada")
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as ex:
+        fg = ex.submit(buscar_gemini)
+        fgr = ex.submit(buscar_groq)
+        fm = ex.submit(buscar_mistral)
+        busqueda_gemini = fg.result()
+        busqueda_groq = fgr.result()
+        busqueda_mistral = fm.result()
+
     prompt_analisis = f"""Eres parte del equipo analista del Motor Alfa Bravo.
 
 === DOCUMENTO OFICIAL DEL MOTOR (LEY INAMOVIBLE) ===
 {doc_motor}
 
-=== DATOS RECOPILADOS POR TODAS LAS FUENTES ===
+=== DATOS QUE PYTHON ENCONTRÓ (scraping + APIs deportivas) ===
 PYTHON (scraping web): {resultado["python"][:600]}
 ODDS API (cuotas reales): {resultado["odds"][:400]}
 FOOTBALL API (stats): {resultado["football"][:600]}
@@ -408,7 +430,7 @@ SPORTSDB (fixtures): {resultado["sportsdb"][:400]}
 === FASE A EJECUTAR ===
 {fase} — {FASE_NOMBRES.get(fase,"")}
 
-=== TUS DATOS DE BÚSQUEDA WEB PROPIOS ===
+=== TU PROPIA BÚSQUEDA WEB (nadie más recibió exactamente esto) ===
 {{DATOS_PROPIOS}}
 
 INSTRUCCIONES:
@@ -420,15 +442,15 @@ INSTRUCCIONES:
 - Eres {{ROL}}."""
 
     def analisis_gemini():
-        p = prompt_analisis.replace("{DATOS_PROPIOS}", resultado["gemini_web"]).replace("{ROL}", "GEMINI — Analista 1")
+        p = prompt_analisis.replace("{DATOS_PROPIOS}", busqueda_gemini).replace("{ROL}", "GEMINI — Analista 1")
         return gemini(p)
 
     def analisis_groq():
-        p = prompt_analisis.replace("{DATOS_PROPIOS}", resultado["groq_web"]).replace("{ROL}", "GROQ — Analista 2")
+        p = prompt_analisis.replace("{DATOS_PROPIOS}", busqueda_groq).replace("{ROL}", "GROQ — Analista 2")
         return groq_ia(p)
 
     def analisis_mistral():
-        p = prompt_analisis.replace("{DATOS_PROPIOS}", resultado["mistral_web"]).replace("{ROL}", "MISTRAL — Analista 3")
+        p = prompt_analisis.replace("{DATOS_PROPIOS}", busqueda_mistral).replace("{ROL}", "MISTRAL — Analista 3")
         return mistral_ia(p)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as ex:
@@ -804,13 +826,18 @@ Somos 5: Tú + Python + Gemini + Groq + Mistral<br><br>
                     "hora":hora,"fase":fase_cmd,"resumen":resultado["consenso"][:120]
                 })
         else:
-            doc_id = leer_docx(service, FASES["F0"]) if service else "Drive no conectado."
-            prompt_gral = f"""Equipo Motor Alfa Bravo respondiendo consulta.
-Documento base: {doc_id[:800]}
-Datos compartidos de sesión: {json.dumps(list(st.session_state["datos_compartidos"].keys()))}
-Consulta: {cmd_cc}
-Responde como equipo (Python + Gemini + Groq + Mistral).
-Si es un comando al motor, ejecútalo. Si es una consulta, respóndela con datos reales."""
+            busqueda_general = ia_busca(cmd_cc)
+            prompt_gral = f"""Responde la siguiente pregunta de forma directa y natural,
+como el asistente de IA que eres, usando tu conocimiento y la información
+de búsqueda web de abajo si es útil (ignórala si no aplica a la pregunta).
+
+Información encontrada en la web:
+{busqueda_general}
+
+Pregunta del usuario: {cmd_cc}
+
+No menciones documentos internos, fases, ni la estructura de ningún motor
+o proyecto a menos que el usuario pregunte explícitamente por eso."""
             with st.spinner("Consultando al equipo..."):
                 with concurrent.futures.ThreadPoolExecutor(max_workers=3) as ex:
                     rg = ex.submit(gemini, prompt_gral)
@@ -889,15 +916,37 @@ for idx, (fase_key, archivo) in enumerate(FASES.items()):
                         st.session_state["num_aprendizaje"] += 1
             else:
                 doc_fase = leer_docx(service, archivo) if service else "Drive no conectado."
-                dc_actual = st.session_state["datos_compartidos"].get(fase_key, {})
-                prompt_q = f"""Motor Alfa Bravo — {fase_key} — {FASE_NOMBRES[fase_key]}
+                doc_valido = doc_fase and not any(
+                    marca in doc_fase for marca in ["NO ENCONTRADO", "ERROR", "Drive no conectado"]
+                )
+                busqueda_fase = ia_busca(cmd_fase)
+
+                if doc_valido:
+                    dc_actual = st.session_state["datos_compartidos"].get(fase_key, {})
+                    prompt_q = f"""Motor Alfa Bravo — {fase_key} — {FASE_NOMBRES[fase_key]}
 
 Documento de {fase_key}: {doc_fase[:800]}
 Datos de sesión de {fase_key}: {json.dumps(dc_actual)[:400]}
 Datos compartidos: {json.dumps({k:v.get("consenso","")[:200] for k,v in st.session_state["datos_compartidos"].items()})[:600]}
+Información de la web: {busqueda_fase[:600]}
 
 Consulta del usuario: {cmd_fase}
-Responde aplicando las reglas del documento Word. Cita las reglas específicas."""
+Responde aplicando las reglas del documento Word cuando sean relevantes,
+y usa la información de la web para datos actuales. Cita las reglas
+específicas solo si aplican a la consulta."""
+                else:
+                    prompt_q = f"""Responde la siguiente pregunta de forma directa y natural,
+como el asistente de IA que eres, usando tu conocimiento y la información
+de búsqueda web de abajo si es útil.
+
+Información encontrada en la web:
+{busqueda_fase}
+
+Pregunta del usuario: {cmd_fase}
+
+No menciones documentos internos, fases, ni la estructura de ningún motor
+o proyecto a menos que el usuario pregunte explícitamente por eso."""
+
                 with st.spinner("Consultando..."):
                     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as ex:
                         rg = ex.submit(gemini, prompt_q)
